@@ -55,9 +55,10 @@ def main():
         if now.minute % 5 == 0 and now.second < 8:
 
             try:
+                # گرفتن داده زنده
                 data = get_ohlc(symbol)
                 df_history = pd.concat([df_history, pd.DataFrame([data])])
-                df_history = df_history.tail(60)  # آخرین 60 کندل
+                df_history = df_history.tail(60)  # نگه داشتن آخرین 60 کندل
 
                 # محاسبه high/low 4 ساعته (48 کندل)
                 df_history["high_4h"] = df_history["high"].shift(48)
@@ -67,7 +68,7 @@ def main():
                     last = df_history.iloc[-1]
                     prev = df_history.iloc[-2]
 
-                    # شرایط ورود Long/Short (همان استراتژی اصلی)
+                    # شرایط ورود Long/Short طبق همان استراتژی اصلی
                     long_signal = (last["close"] >= last["low_4h"] + delta) and (prev["close"] < last["low_4h"] + delta)
                     short_signal = (last["close"] <= last["high_4h"] - delta) and (prev["close"] > last["high_4h"] - delta)
 
