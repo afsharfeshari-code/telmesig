@@ -4,99 +4,95 @@ import pandas as pd
 from tradingview_ta import TA_Handler, Interval
 import pytz
 from datetime import datetime
-import os
 
 # ===== تنظیمات تلگرام =====
 TELEGRAM_TOKEN = "8448021675:AAE0Z4jRdHZKLVXxIBEfpCb9lUbkkxmlW-k"
 TELEGRAM_CHAT_ID = "7107618784"
 
-symbols = ["NEARUSDT"]
+# ===== تنظیمات استراتژی اصلی =====
+symbol = "NEARUSDT"
 interval = Interval.INTERVAL_5_MINUTES
 delta = 0.001
+leverage = 20
+take_profit_ratio = 0.20
+stop_loss_ratio = 0.30
+
+# نگهداری داده‌ها و آخرین سیگنال
+df_history = pd.DataFrame()
+last_signal_time = None
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    requests.post(url, data=data)
+    try:
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
+    except:
+        print("⚠ خطا در ارسال پیام تلگرام")
 
 def get_ohlc(symbol):
     handler = TA_Handler(
         symbol=symbol.replace("USDT",""),
         screener="crypto",
-        exchange="BINANCE",
+        exchange="",  # خالی می‌گذاریم تا TradingView خودش دیتا بده
         interval=interval
     )
     analysis = handler.get_analysis()
-
     return {
-        "open": analysis.indicators["open"],
-        "high": analysis.indicators["high"],
-        "low": analysis.indicators["low"],
-        "close": analysis.indicators["close"],
+        "open": float(analysis.indicators["open"]),
+        "high": float(analysis.indicators["high"]),
+        "low": float(analysis.indicators["low"]),
+        "close": float(analysis.indicators["close"]),
+        "timestamp": datetime.utcnow()
     }
 
-send_telegram("ربات استراتژی اصلی فعال شد ✅")
+def main():
+    global df_history, last_signal_time
+    print("🚀 ربات TradingView با استراتژی اصلی فعال شد")
 
-while True:
-    now = datetime.utcnow()
+    while True:
+        now = datetime.utcnow()
 
-    # فقط ابتدای هر کندل 5 دقیقه‌ای
-    if now.minute % 5 == 0 and now.second < 8:
-
-        for symbol in symbols:
+        # فقط ابتدای هر کندل 5 دقیقه‌ای
+        if now.minute % 5 == 0 and now.second < 8:
 
             try:
                 data = get_ohlc(symbol)
+                df_history = pd.concat([df_history, pd.DataFrame([data])])
+                df_history = df_history.tail(60)  # آخرین 60 کندل
 
-                if os.path.exists("history.csv"):
-                    df = pd.read_csv("history.csv")
-                else:
-                    df = pd.DataFrame()
+                # محاسبه high/low 4 ساعته (48 کندل)
+                df_history["high_4h"] = df_history["high"].shift(48)
+                df_history["low_4h"] = df_history["low"].shift(48)
 
-                df = pd.concat([df, pd.DataFrame([data])])
-                df = df.tail(60)
+                if len(df_history) > 48:
+                    last = df_history.iloc[-1]
+                    prev = df_history.iloc[-2]
 
-                df["high_4h"] = df["high"].shift(48)
-                df["low_4h"] = df["low"].shift(48)
-
-                if len(df) > 48:
-
-                    last = df.iloc[-1]
-                    prev = df.iloc[-2]
-
-                    long_signal = (
-                        last["close"] >= last["low_4h"] + delta and
-                        prev["close"] < last["low_4h"] + delta
-                    )
-
-                    short_signal = (
-                        last["close"] <= last["high_4h"] - delta and
-                        prev["close"] > last["high_4h"] - delta
-                    )
+                    # شرایط ورود Long/Short (همان استراتژی اصلی)
+                    long_signal = (last["close"] >= last["low_4h"] + delta) and (prev["close"] < last["low_4h"] + delta)
+                    short_signal = (last["close"] <= last["high_4h"] - delta) and (prev["close"] > last["high_4h"] - delta)
 
                     if long_signal or short_signal:
-
-                        signal_type = "🚀 LONG" if long_signal else "🔻 SHORT"
-                        price = round(last["close"], 2)
-
-                        iran_time = datetime.now(
-                            pytz.timezone("Asia/Tehran")
-                        ).strftime("%Y-%m-%d %H:%M:%S")
-
-                        message = f"""
+                        # جلوگیری از ارسال چندباره در همان کندل
+                        if last_signal_time != last["timestamp"]:
+                            signal_type = "🚀 LONG" if long_signal else "🔻 SHORT"
+                            price = round(last["close"], 2)
+                            iran_time = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d %H:%M:%S")
+                            message = f"""
 {signal_type} SIGNAL
 Symbol: {symbol}
 Time (Iran): {iran_time}
 Entry Price: {price}
 """
-
-                        send_telegram(message)
-
-                df.to_csv("history.csv", index=False)
+                            send_telegram(message)
+                            print(message)
+                            last_signal_time = last["timestamp"]
 
             except Exception as e:
-                print("خطا:", e)
+                print("⚠ خطا:", e)
 
-        time.sleep(10)
+            time.sleep(10)
 
-    time.sleep(1)
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main()
